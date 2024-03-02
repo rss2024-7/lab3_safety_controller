@@ -40,14 +40,12 @@ class SafetyController(Node):
             self.drive_callback,
             10)
         
-        # self.line_pub = self.create_publisher(Marker, self.WALL_TOPIC, 1)
-        # self.dist_line_pub = self.create_publisher(Marker, self.DISTANCE_TOPIC, 1)
-        # self.angle_pub = self.create_publisher(Marker, self.ANGLE_TOPIC, 1)
 
         self.CAR_LENGTH = 0.3 # meters
         self.CAR_WIDTH = 0.32 # meters (not sure if value is correct, just guessing)
 
-        self.drive_forward()
+        # UNCOMMENT LINE BELOW FOR TESTING
+        # self.drive_forward()
 
     # Write your callback functions here 
     def drive_forward(self):
@@ -77,11 +75,12 @@ class SafetyController(Node):
         MAX_STEER = 0.34
         FUTURE_DIST = 0.03
         steering_angle = 0.0
+
         if self.drive_msg:
             FUTURE_DIST += 0.01 * self.drive_msg.drive.speed
             steering_angle = self.drive_msg.drive.steering_angle
 
-
+        # polar lidar coordinates to cartesian coordinates
         ranges = np.array(scan.ranges)
         angle_min = scan.angle_min
         angle_increment = scan.angle_increment
@@ -91,19 +90,22 @@ class SafetyController(Node):
         x = ranges * np.cos(angles)
         y = ranges * np.sin(angles)
 
+        # create rectangle in front of car
         low_y = - self.CAR_WIDTH / 2 + 0.02 * min(0, steering_angle / MAX_STEER)
         high_y = self.CAR_WIDTH / 2 + 0.02 * max(0, steering_angle / MAX_STEER)
         low_x = 0
         high_x = 4.0 * FUTURE_DIST
 
+        # check if any points in rectangle
         within_front = np.where(np.logical_and(y >= low_y, y <= high_y))
         x_within = x[within_front]
-        
         close_front = np.logical_and(x_within >= low_x, x_within <= high_x)
 
         if np.any(close_front):
-            while True:
-                self.stop()
+            # UNCOMMENT WHILE LOOP BELOW FOR TESTING WITH WALL FOLLOWER IN SIM
+            # while True: # blocking code >:)
+            #     self.stop()
+            self.stop()
 
 
     def drive_callback(self, drive):

@@ -1,0 +1,4 @@
+safety_follower:
+  ros__parameters:
+    scan_topic: "/scan"
+    drive_topic: "/drive"

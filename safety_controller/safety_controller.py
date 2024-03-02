@@ -16,7 +16,7 @@ class SafetyController(Node):
         # Declare parameters to make them available for use
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("drive_topic", "/drive")
-        self.VELOCITY = 2.0
+        self.VELOCITY = 4.0
 
         # Fetch constants from the ROS parameter server
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
@@ -45,7 +45,7 @@ class SafetyController(Node):
         # self.angle_pub = self.create_publisher(Marker, self.ANGLE_TOPIC, 1)
 
         self.CAR_LENGTH = 0.3 # meters
-        self.CAR_WIDTH = 0.1 # meters (not sure if value is correct, just guessing)
+        self.CAR_WIDTH = 0.32 # meters (not sure if value is correct, just guessing)
 
         self.drive_forward()
 
@@ -74,9 +74,13 @@ class SafetyController(Node):
 
     def lidar_callback(self, scan):
         # self.get_logger().info('Received scan!')
+        MAX_STEER = 0.34
         FUTURE_DIST = 0.03
+        steering_angle = 0.0
         if self.drive_msg:
             FUTURE_DIST += 0.01 * self.drive_msg.drive.speed
+            steering_angle = self.drive_msg.drive.steering_angle
+
 
         ranges = np.array(scan.ranges)
         angle_min = scan.angle_min
@@ -87,8 +91,8 @@ class SafetyController(Node):
         x = ranges * np.cos(angles)
         y = ranges * np.sin(angles)
 
-        low_y = - self.CAR_LENGTH / 2
-        high_y = self.CAR_LENGTH / 2
+        low_y = - self.CAR_WIDTH / 2 + 0.02 * min(0, steering_angle / MAX_STEER)
+        high_y = self.CAR_WIDTH / 2 + 0.02 * max(0, steering_angle / MAX_STEER)
         low_x = 0
         high_x = 4.0 * FUTURE_DIST
 
@@ -98,7 +102,8 @@ class SafetyController(Node):
         close_front = np.logical_and(x_within >= low_x, x_within <= high_x)
 
         if np.any(close_front):
-            self.stop()
+            while True:
+                self.stop()
 
 
     def drive_callback(self, drive):

@@ -1,5 +1,4 @@
 safety_follower:
   ros__parameters:
     scan_topic: "/scan"
-    drive_topic: "/vesc/high_level/output"
-    stop_topic: "vesc/low_level/input/safety"
+    drive_topic: "/drive"

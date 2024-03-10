@@ -22,13 +22,8 @@ class SafetyController(Node):
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
         self.DRIVE_TOPIC = self.get_parameter('drive_topic').get_parameter_value().string_value
         self.STOP_TOPIC = self.get_parameter('stop_topic').get_parameter_value().string_value
-        
-        self.WALL_TOPIC = "/wall"
 
         self.drive_msg = None
-            
-        self.DRIVE_TOPIC = "/vesc/high_level/ackermann_cmd"
-        self.get_logger().info(self.DRIVE_TOPIC)
 
         # Initialize your publishers and subscribers here
         self.publisher_ = self.create_publisher(AckermannDriveStamped, self.STOP_TOPIC, 10)

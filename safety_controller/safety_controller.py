@@ -14,7 +14,7 @@ class SafetyController(Node):
         super().__init__("safety_controller")
         # Declare parameters to make them available for use
         self.declare_parameter("scan_topic", "/scan")
-        self.declare_parameter("drive_topic", "/vesc/high_level/output")
+        self.declare_parameter("drive_topic", "/vesc/low_level/ackermann_cmd")
         self.declare_parameter("stop_topic", "/vesc/low_level/input/safety")
         self.speed = 1.0
 
@@ -26,9 +26,6 @@ class SafetyController(Node):
         self.WALL_TOPIC = "/wall"
 
         self.drive_msg = None
-            
-        self.DRIVE_TOPIC = "/vesc/high_level/ackermann_cmd"
-        self.get_logger().info(self.DRIVE_TOPIC)
 
         # Initialize your publishers and subscribers here
         self.publisher_ = self.create_publisher(AckermannDriveStamped, self.STOP_TOPIC, 10)
@@ -55,18 +52,6 @@ class SafetyController(Node):
     def drive_callback(self, drive):
         self.drive_msg = drive
 
-
-    def drive_forward(self):
-        self.get_logger().info('Drive Forward')
-        drive_msg = AckermannDriveStamped()
-        drive_msg.drive.speed = self.VELOCITY
-        drive_msg.drive.acceleration = 0.0
-        drive_msg.drive.jerk = 0.0
-
-        drive_msg.drive.steering_angle = 0.0
-        drive_msg.drive.steering_angle_velocity = 0.0
-        self.publisher_.publish(drive_msg)
-
     def stop(self):
         # self.get_logger().info('STOP')
         msg = AckermannDriveStamped()
@@ -83,20 +68,11 @@ class SafetyController(Node):
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
         self.DRIVE_TOPIC = self.get_parameter('drive_topic').get_parameter_value().string_value
 
-        # self.get_logger().info('Received scan!')
-        MAX_STEER = 0.34
         steering_angle = 0.0
 
         if self.drive_msg is not None:
-            #if self.drive_msg.drive.speed > 0.0:
-            #    self.get_logger().info('"%s"' % self.drive_msg.drive.speed)
-            # if self.drive_msg.drive.speed > self.SPEED:
             self.speed = self.drive_msg.drive.speed
             steering_angle = self.drive_msg.drive.steering_angle
-
-        #react_time = 0.05
-        #max_deceleration = 14.0 # m/s^2
-        #stop_dist = 2.0 * self.speed / max_deceleration + react_time * self.speed
         
         # found via experimenting
         stop_dist = (0.41 * self.speed + 0.2) ** 2
@@ -111,9 +87,9 @@ class SafetyController(Node):
         x = ranges * np.cos(angles)
         y = ranges * np.sin(angles)
 
-        # create parallelogram in front of car
-        low_y = - self.CAR_WIDTH / 2 + (x) * np.arctan(steering_angle)
-        high_y = self.CAR_WIDTH / 2 + (x) * np.arctan(steering_angle)
+        # create rectangle in front of car
+        low_y = - self.CAR_WIDTH / 2
+        high_y = self.CAR_WIDTH / 2
         low_x = self.DIST_TO_BUMPER
         high_x = self.DIST_TO_BUMPER + stop_dist
 
@@ -123,14 +99,14 @@ class SafetyController(Node):
         close_front = np.logical_and(x_within >= low_x, x_within <= high_x)
 
         
-        # can't create circle if steering angle is exactly 0
-        if np.any(close_front):
+        # can't create donut if steering angle is exactly 0
+        if steering_angle == 0 and np.any(close_front):
             self.stop()
             return
 
         # IF HERE, THERE IS A STEERING ANGLE
 
-        # create circular section in front of car
+        # create donut section in front of car
         turn_radius = np.abs(self.CAR_LENGTH / np.sin(steering_angle))
         turn_sign = np.sign(steering_angle) # -1 for right, 1 for left turn
         inner_radius = turn_radius - self.CAR_WIDTH / 2.0
@@ -139,34 +115,29 @@ class SafetyController(Node):
         inner_circle = turn_sign * inner_radius - turn_sign * np.sqrt(inner_radius**2 - x**2)
         outer_circle = turn_sign * outer_radius - turn_sign * np.sqrt(outer_radius**2 - x**2)
 
-        # end of the circular section
+        # end of the donut section
         dist_line = - turn_sign * np.tan(np.pi / 2 - stop_dist / turn_radius) * x + turn_sign * turn_radius
         
-        if turn_sign == 1: # LEFT
-            upper_side = inner_circle
-            lower_side = outer_circle
-            within_turn = np.where(np.logical_and(lower_side <= y, y <= upper_side))
-            y_within = y[within_turn]
-            dist_line = dist_line[within_turn]
-            close_front = y_within <= dist_line
-        if turn_sign == -1: # RIGHT
+        
+        # LEFT
+        upper_side = inner_circle
+        lower_side = outer_circle
+
+        # RIGHT
+        if turn_sign == -1: 
             upper_side = outer_circle
             lower_side = inner_circle
-            within_turn = np.where(np.logical_and(lower_side <= y, y<= upper_side))
-            y_within = y[within_turn]
-            dist_line = dist_line[within_turn]
-            close_front = y_within >= dist_line
+            
+        # check for any points in donut
+        within_turn = np.where(np.logical_and(lower_side <= y, y<= upper_side))
+        y_within = y[within_turn]
+        dist_line = dist_line[within_turn]
+        close_front = y_within >= dist_line
 
+        # stop car if any points in donut
         if np.any(close_front):
             self.stop()
-        
-        
 
-        if np.any(close_front):
-            # UNCOMMENT WHILE LOOP BELOW FOR TESTING WITH WALL FOLLOWER IN SIM
-            # while True: # blocking code >:)
-            #     self.stop()
-            self.stop()
 
 def main():
 

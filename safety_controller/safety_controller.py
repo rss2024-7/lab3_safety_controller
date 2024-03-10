@@ -26,6 +26,9 @@ class SafetyController(Node):
         self.WALL_TOPIC = "/wall"
 
         self.drive_msg = None
+            
+        self.DRIVE_TOPIC = "/vesc/high_level/ackermann_cmd"
+        self.get_logger().info(self.DRIVE_TOPIC)
 
         # Initialize your publishers and subscribers here
         self.publisher_ = self.create_publisher(AckermannDriveStamped, self.STOP_TOPIC, 10)
@@ -76,6 +79,9 @@ class SafetyController(Node):
         
         # found via experimenting
         stop_dist = (0.41 * self.speed + 0.2) ** 2
+        
+        # found via experimenting
+        stop_dist = (0.41 * self.speed + 0.2) ** 2
 
         # polar lidar coordinates to cartesian coordinates
         ranges = np.array(scan.ranges)
@@ -90,6 +96,7 @@ class SafetyController(Node):
         # create rectangle in front of car
         low_y = - self.CAR_WIDTH / 2
         high_y = self.CAR_WIDTH / 2
+
         low_x = self.DIST_TO_BUMPER
         high_x = self.DIST_TO_BUMPER + stop_dist
 
@@ -98,7 +105,6 @@ class SafetyController(Node):
         x_within = x[within_front]
         close_front = np.logical_and(x_within >= low_x, x_within <= high_x)
 
-        
         # can't create donut if steering angle is exactly 0
         if steering_angle == 0 and np.any(close_front):
             self.stop()
@@ -137,7 +143,6 @@ class SafetyController(Node):
         # stop car if any points in donut
         if np.any(close_front):
             self.stop()
-
 
 def main():
 

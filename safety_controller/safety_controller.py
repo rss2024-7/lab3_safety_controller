@@ -14,7 +14,7 @@ class SafetyController(Node):
         super().__init__("safety_controller")
         # Declare parameters to make them available for use
         self.declare_parameter("scan_topic", "/scan")
-        self.declare_parameter("drive_topic", "/vesc/low_level/ackermann_cmd")
+        self.declare_parameter("drive_topic", "/vesc/high_level/ackermann_cmd")
         self.declare_parameter("stop_topic", "/vesc/low_level/input/safety")
         self.speed = 1.0
 
@@ -22,6 +22,10 @@ class SafetyController(Node):
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
         self.DRIVE_TOPIC = self.get_parameter('drive_topic').get_parameter_value().string_value
         self.STOP_TOPIC = self.get_parameter('stop_topic').get_parameter_value().string_value
+
+        self.line_pub = self.create_publisher(Marker, "/wall", 1)
+        self.inner_circle_pub = self.create_publisher(Marker, "/inner_circle", 1)
+        self.outer_circle_pub = self.create_publisher(Marker, "/outer_circle", 1)
 
         self.drive_msg = None
 
@@ -62,6 +66,8 @@ class SafetyController(Node):
 
 
     def lidar_callback(self, scan):
+        if self.speed < 0: return
+
         # Fetch constants from the ROS parameter server
         self.SCAN_TOPIC = self.get_parameter('scan_topic').get_parameter_value().string_value
         self.DRIVE_TOPIC = self.get_parameter('drive_topic').get_parameter_value().string_value
@@ -72,9 +78,7 @@ class SafetyController(Node):
             self.speed = self.drive_msg.drive.speed
             steering_angle = self.drive_msg.drive.steering_angle
         
-        # found via experimenting
-        stop_dist = (0.41 * self.speed + 0.2) ** 2
-        
+
         # found via experimenting
         stop_dist = (0.41 * self.speed + 0.2) ** 2
 
@@ -89,8 +93,8 @@ class SafetyController(Node):
         y = ranges * np.sin(angles)
 
         # create rectangle in front of car
-        low_y = - self.CAR_WIDTH / 2
-        high_y = self.CAR_WIDTH / 2
+        low_y = - self.CAR_WIDTH / 2 + x * np.arctan(steering_angle)
+        high_y = self.CAR_WIDTH / 2 + x * np.arctan(steering_angle)
 
         low_x = self.DIST_TO_BUMPER
         high_x = self.DIST_TO_BUMPER + stop_dist
@@ -100,40 +104,76 @@ class SafetyController(Node):
         x_within = x[within_front]
         close_front = np.logical_and(x_within >= low_x, x_within <= high_x)
 
-        # can't create donut if steering angle is exactly 0
-        if steering_angle == 0 and np.any(close_front):
+        if np.any(close_front):
             self.stop()
-            return
+            
+        return
 
-        # IF HERE, THERE IS A STEERING ANGLE
+        #######################################
+        # DONUT SAFETY CONTROLLER NOT WORKING #
+        #######################################
 
         # create donut section in front of car
         turn_radius = np.abs(self.CAR_LENGTH / np.sin(steering_angle))
         turn_sign = np.sign(steering_angle) # -1 for right, 1 for left turn
         inner_radius = turn_radius - self.CAR_WIDTH / 2.0
-        outer_radius = turn_radius - self.CAR_WIDTH / 2.0
+        outer_radius = turn_radius + self.CAR_WIDTH / 2.0
 
+        # filter out points past 90 degree turn
+        # x = x[np.where(abs(y) <= turn_radius)]
+        # y = y[np.where(abs(y) <= turn_radius)]
+
+        # y values
         inner_circle = turn_sign * inner_radius - turn_sign * np.sqrt(inner_radius**2 - x**2)
         outer_circle = turn_sign * outer_radius - turn_sign * np.sqrt(outer_radius**2 - x**2)
 
+        # x values
+        inner_circle = np.sqrt(inner_radius ** 2 - (y - turn_sign * turn_radius) ** 2) # + self.DIST_TO_BUMPER
+        outer_circle = np.sqrt(outer_radius ** 2 - (y - turn_sign * turn_radius) ** 2) # + self.DIST_TO_BUMPER
+
+        # self.get_logger().info('inner "%s"' % inner_circle)
+        # self.get_logger().info('outer "%s"' % outer_circle)
+
         # end of the donut section
         dist_line = - turn_sign * np.tan(np.pi / 2 - stop_dist / turn_radius) * x + turn_sign * turn_radius
-        
-        
-        # LEFT
-        upper_side = inner_circle
-        lower_side = outer_circle
+        # dist_line = (y - turn_sign * turn_radius)/(- turn_sign * np.tan(np.pi / 2 - stop_dist / turn_radius))
 
-        # RIGHT
-        if turn_sign == -1: 
-            upper_side = outer_circle
-            lower_side = inner_circle
+        # if distance line is past 90 degs
+        if np.tan(np.pi / 2 - stop_dist / turn_radius) != turn_sign:
+            dist_line = turn_sign * turn_radius * np.ones(x.shape)
+
+        upper_side = outer_circle
+        lower_side = inner_circle
+
+        out_of_range = np.logical_or(np.isnan(lower_side), np.isnan(upper_side))
+        in_range = np.logical_not(out_of_range)
+
+        x = x[np.where(in_range)]
+        y = y[np.where(in_range)]
+
+        lower_side = lower_side[np.where(in_range)]
+        upper_side = upper_side[np.where(in_range)]
+        dist_line = dist_line[np.where(in_range)]
+
+        # self.get_logger().info('"%s"' % lower_side)
             
         # check for any points in donut
-        within_turn = np.where(np.logical_and(lower_side <= y, y<= upper_side))
+        within_turn = np.where(np.logical_and(lower_side <= x, x <= upper_side))
+        x_within = x[within_turn]
         y_within = y[within_turn]
-        dist_line = dist_line[within_turn]
-        close_front = y_within >= dist_line
+        # self.get_logger().info('"%s"' % len(y_within))
+    
+        dist_line = dist_line = - turn_sign * np.tan(np.pi / 2 - stop_dist / turn_radius) * x_within + turn_sign * turn_radius
+        # close_front = y_within <= dist_line
+        
+        # if turn_sign == -1: close_front = y_within >= dist_line
+
+        close_front = x_within <= dist_line
+
+        # VisualizationTools.plot_line(x, dist_line, self.line_pub, frame="laser")
+        VisualizationTools.plot_line(x_within, dist_line, self.line_pub, frame="laser")
+        VisualizationTools.plot_line(np.sqrt(inner_radius ** 2 - (y_within - turn_sign * turn_radius) ** 2), y_within, self.inner_circle_pub, frame="laser")
+        VisualizationTools.plot_line(np.sqrt(outer_radius ** 2 - (y - turn_sign * turn_radius) ** 2), y, self.outer_circle_pub, frame="laser")
 
         # stop car if any points in donut
         if np.any(close_front):
